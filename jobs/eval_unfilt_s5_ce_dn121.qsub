@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N u_s5_dn
+#$ -l h_rt=00:50:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/u_s5_dn_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs outputs/evaluation_unfiltered_check
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data.yaml \
+    --config configs/classifier.yaml \
+    --output-dir outputs/evaluation_unfiltered_check \
+    --tag unfilt_s5_ce_dn121 \
+    --backbone densenet121 \
+    --optimizer adamw \
+    --loss-type ce \
+    --synthetic-manifest outputs/cyclegan/synthetic_kl3/synthetic_manifest.csv \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --synthetic-repeat-kl3 1 \
+    --batch-size 32 \
+    --lr 0.00008 \
+    --weight-decay 0.005 \
+    --ema-decay 0.996 \
+    --translate-x 0.05 \
+    --translate-y 0.09 \
+    --scale-jitter 0.09 \
+    --brightness-jitter 0.08 \
+    --contrast-jitter 0.10 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.000001 \
+    --epochs 25 \
+    --patience 10 \
+    --min-best-epoch 1 \
+    --selection-metric val_loss \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader

@@ -1,0 +1,51 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N s3_os_ce_v
+#$ -l h_rt=00:45:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/s3_os_ce_v_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir outputs/evaluation_paper_check \
+    --tag s3_os_ce_vgg19 \
+    --backbone vgg19 \
+    --optimizer adam \
+    --loss-type ce \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0 \
+    --scale-jitter 0.0 \
+    --brightness-jitter 0.0 \
+    --contrast-jitter 0.0 \
+    --translate-x 0.0 \
+    --translate-y 0.0 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 25 \
+    --patience 10 \
+    --min-best-epoch 1 \
+    --selection-metric val_loss \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader

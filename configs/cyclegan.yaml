@@ -1,0 +1,53 @@
+# CycleGAN training & synthesis configuration
+# Aligned with Zhu et al. (ICCV 2017) & Tank et al. (Algorithms 2026)
+
+experiment:
+  name: cyclegan_dip_kl0_to_kl3
+  output_dir: outputs/cyclegan
+  seed: 42
+
+data:
+  domain_a_grades: [0]      # Source domain (healthy: KL0)
+  domain_b_grades: [3]      # Target domain (moderate/severe OA: KL3)
+  joints: [DIP2, DIP3, DIP4, DIP5]
+  image_size: 256           # ResNet-9 expects 256x256 (divisible by 4)
+  in_channels: 1            # Grayscale X-rays (set 3 if RGB required)
+  batch_size: 16
+  num_workers: 4
+
+model:
+  ngf: 64
+  ndf: 64
+  n_res_blocks: 9           # 9 residual blocks for 256x256 (6 for 128x128)
+  gan_mode: lsgan           # "lsgan" (MSE) or "vanilla" (BCEWithLogits)
+  pool_size: 50             # Image history buffer size (Zhu et al. 2017)
+
+training:
+  epochs: 200
+  decay_start_epoch: 100    # Constant LR for first 100 epochs, linear decay for next 100
+  lr: 0.0002
+  beta1: 0.5
+  beta2: 0.999
+  lambda_cycle_a: 10.0
+  lambda_cycle_b: 10.0
+  lambda_identity: 0.0      # Set >0 (e.g., 0.5) to enable identity loss
+  save_every_epochs: 5      # Save checkpoint every 5 epochs (Tank et al. 2026)
+  sample_every_epochs: 1    # Save visual inspection grids each epoch
+  use_amp: true             # Uses bfloat16 on Ampere/Ada GPUs (L40S/A40/A100) for ~2x speedup
+
+early_stopping:
+  enabled: true
+  eval_every_epochs: 5      # Evaluate val_kid + val_cycle_ssim alongside checkpoints
+  min_epochs: 40            # Warmup before early stopping can stop training
+  patience: 8               # Stop if val_kid does not improve for 8 checks (= 40 epochs)
+  min_delta: 0.0005         # Minimum KID improvement to reset patience
+  min_cycle_ssim: 0.75      # Anatomical preservation floor required for best_checkpoint.pt
+  min_delta_l1: 0.015       # Guards against identity collapse (G(x) == x)
+  use_pretrained_inception: true
+
+generation:
+  source_split: train       # Use "train" (or "val") to keep val/test pure; NEVER "test"
+  direction: a2b            # "a2b" translates Domain A (KL0) -> Domain B (KL3)
+  target_label: 3
+  max_samples: 300          # Pool size for visual/clinical quality review
+  output_subdir: synthetic_kl3

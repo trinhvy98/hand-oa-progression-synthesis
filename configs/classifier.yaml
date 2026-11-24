@@ -1,0 +1,30 @@
+# Downstream KL-grade classification evaluation configuration
+# Fairly compares Baseline vs CycleGAN vs Diffusion on the identical locked test split.
+
+experiment:
+  name: vgg19_dip_downstream
+  output_dir: outputs/evaluation
+  seed: 42
+
+model:
+  backbone: vgg19_bn
+  pretrained: true
+  num_classes: 5
+  dropout: 0.5
+
+data:
+  joints: [DIP2, DIP3, DIP4, DIP5]
+  image_size: 224
+  batch_size: 32
+  num_workers: 4
+  oversample_multipliers:
+    3: 1                    # Increase (e.g., 5) to match Tank et al. SD + OS experiments
+    4: 1                    # Increase (e.g., 10) for KL4 oversampling
+
+training:
+  epochs: 50
+  lr: 0.0001
+  weight_decay: 0.0001
+  loss_type: focal          # "ce" (CrossEntropy) or "focal" (FocalLoss)
+  focal_gamma: 2.0
+  oa_threshold_kl: 3        # KL >= 3 treated as OA-positive for binary metrics

@@ -1,0 +1,62 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_m5_dn121
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_m5_dn121_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_v6/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v8_densenet"
+
+echo "=== Model 5 DenseNet121 (Pure-KL3 200, Split-OS 4/9 + SynRepeat 2, Gentle Y-Shift 0.09, No Cutout, EMA 0.996), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v8_dn121_sd_os_focal \
+    --backbone densenet121 \
+    --optimizer adamw \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.65 1.95 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 4 \
+    --oversample-kl4 9 \
+    --synthetic-repeat-kl3 2 \
+    --batch-size 32 \
+    --lr 0.00010 \
+    --weight-decay 0.005 \
+    --ordinal-weight 0.12 \
+    --ema-decay 0.996 \
+    --tta-views 1 \
+    --translate-x 0.05 \
+    --translate-y 0.09 \
+    --scale-jitter 0.09 \
+    --cutout-prob 0.0 \
+    --brightness-jitter 0.08 \
+    --contrast-jitter 0.10 \
+    --scheduler cosine \
+    --min-lr 0.000001 \
+    --epochs 50 \
+    --patience 22 \
+    --min-best-epoch 10 \
+    --selection-metric oa_balanced \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v8_dn121_seed42.pt"

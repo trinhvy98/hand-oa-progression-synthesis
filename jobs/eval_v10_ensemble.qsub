@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_v10_ens
+#$ -l h_rt=00:15:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_v10_ens_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "=== Multi-Backbone Val-Selected Ensemble (incl DenseNet121 v10_mt) ==="
+.venv/bin/python evaluation/eval_ensemble.py \
+    --hierarchical-oa \
+    --models \
+        densenet121:outputs/evaluation_v10_dn_mt/model5_v10_dn121_mt_seed42.pt \
+        densenet121:outputs/evaluation_v8_densenet/model5_v8_dn121_seed42.pt \
+        convnext_tiny:outputs/evaluation_v6_convnext/model5_v6_convnext_seed42.pt \
+        vgg19_sp:outputs/evaluation_v6_sp/model5_v6_sp_seed42.pt

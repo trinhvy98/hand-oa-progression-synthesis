@@ -1,0 +1,55 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N cg_v5_cln
+#$ -l h_rt=04:00:00
+#$ -l gpus=2
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/cg_v5_cln_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+export OMP_NUM_THREADS=2
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python cyclegan/scripts/prepare_filtered_splits.py --config configs/data_filtered_v2.yaml
+
+RESUME_ARGS=()
+if [ -n "${RESUME_CKPT:-}" ]; then
+    echo "Resuming from checkpoint: ${RESUME_CKPT}"
+    RESUME_ARGS=(--resume "${RESUME_CKPT}")
+fi
+
+.venv/bin/python -m torch.distributed.run \
+    --standalone \
+    --nproc_per_node=2 \
+    cyclegan/scripts/train_cyclegan.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/cyclegan_v5_clean.yaml \
+    "${RESUME_ARGS[@]}"
+
+CKPT="outputs/cyclegan_v5_clean/checkpoints/best_checkpoint.pt"
+if [ ! -f "${CKPT}" ]; then
+    CKPT="$(ls -1 outputs/cyclegan_v5_clean/checkpoints/epoch_*.pt | tail -n 1)"
+fi
+echo "Generating 2,500 native 224x224 KL3 candidates from checkpoint: ${CKPT}"
+
+SYN_DIR="outputs/cyclegan_v5_clean/synthetic_kl3"
+rm -rf "${SYN_DIR}/images"
+mkdir -p "${SYN_DIR}/images"
+
+.venv/bin/python cyclegan/scripts/generate_synthetic.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/cyclegan_v5_clean.yaml \
+    --checkpoint "${CKPT}" \
+    --max-samples 2500 \
+    --output-dir "${SYN_DIR}"

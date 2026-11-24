@@ -1,0 +1,81 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N m5_v5_cln
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/m5_v5_cln_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs outputs/evaluation_model5_v5_clean
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+RAW_SYN="outputs/cyclegan_v5_clean/synthetic_kl3/synthetic_manifest.csv"
+FILT_SYN="outputs/cyclegan_v5_clean/synthetic_kl3/synthetic_manifest_physical_v2.csv"
+OUT_DIR="outputs/evaluation_model5_v5_clean"
+
+echo "=== Stage 1: Pure Physical Filter 2 (0% AI / Oracle) on CycleGAN v5 Clean Pool ==="
+.venv/bin/python cyclegan/scripts/filter_synthetic_kl3.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --cyclegan-config configs/cyclegan_v5_clean.yaml \
+    --classifier-config configs/classifier_filtered.yaml \
+    --physical-only \
+    --max-bg-diff 1.50 \
+    --min-ssim 0.80 \
+    --max-ssim 0.955 \
+    --min-delta-l1 0.035 \
+    --max-delta-l1 0.195 \
+    --min-lap-ratio 0.58 \
+    --max-lap-ratio 2.55 \
+    --min-joint-focus 0.75 \
+    --max-per-patient 2 \
+    --max-accepted 200 \
+    --synthetic-manifest "${RAW_SYN}" \
+    --output-manifest "${FILT_SYN}"
+
+echo "=== Stage 2: Exact Paper Strategy 6 (VGG19 no-BN + Focal gamma=2.94 alpha=[0.8,0.8,0.8,1.6,1.44] + Adam 1e-5 + Plateau + ValLoss) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v5_clean_paper_vgg19_s6_focal \
+    --backbone vgg19 \
+    --optimizer adam \
+    --loss-type focal \
+    --focal-gamma 2.94 \
+    --class-weights 0.80 0.80 0.80 1.60 1.44 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --synthetic-repeat-kl3 1 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0 \
+    --ema-decay 0.0 \
+    --scale-jitter 0.0 \
+    --brightness-jitter 0.0 \
+    --contrast-jitter 0.0 \
+    --translate-x 0.0 \
+    --translate-y 0.0 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 200 \
+    --patience 10 \
+    --min-best-epoch 1 \
+    --selection-metric val_loss \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v5_clean_paper_vgg19_s6_focal_seed42.pt"

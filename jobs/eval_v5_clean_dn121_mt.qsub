@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N v5_dn121_mt
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/v5_dn121_mt_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs outputs/evaluation_model5_v5_clean
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_v5_clean/synthetic_kl3/synthetic_manifest_physical_v2.csv"
+OUT_DIR="outputs/evaluation_model5_v5_clean"
+
+echo "=== DenseNet121 MT (Aux OARSI + Stage1 OA-BCE + Stage2 KL3vsKL4 Pair BCE + HierOA) on Clean v2 + Pure Physical Filter 2, Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v5_clean_dn121_mt \
+    --backbone densenet121 \
+    --optimizer adamw \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.80 2.10 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 9 \
+    --synthetic-repeat-kl3 2 \
+    --batch-size 32 \
+    --lr 0.00008 \
+    --weight-decay 0.01 \
+    --ordinal-weight 0.12 \
+    --aux-subscore-weight 0.35 \
+    --oa-bce-weight 0.45 \
+    --oa-pos-weight 1.6 \
+    --severe-pair-weight 0.55 \
+    --severe-pos-weight 0.85 \
+    --ema-decay 0.996 \
+    --tta-views 1 \
+    --hierarchical-oa \
+    --translate-x 0.05 \
+    --translate-y 0.09 \
+    --scale-jitter 0.09 \
+    --cutout-prob 0.0 \
+    --brightness-jitter 0.08 \
+    --contrast-jitter 0.10 \
+    --scheduler cosine \
+    --min-lr 0.000001 \
+    --epochs 45 \
+    --patience 18 \
+    --min-best-epoch 5 \
+    --selection-metric oa_balanced_clean \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v5_clean_dn121_mt_seed42.pt"

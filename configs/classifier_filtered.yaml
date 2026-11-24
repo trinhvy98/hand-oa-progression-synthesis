@@ -1,0 +1,29 @@
+# Downstream VGG19 evaluation config for Filter-1 clean dataset & Model 5
+
+experiment:
+  name: vgg19_dip_downstream_filtered
+  output_dir: outputs/evaluation_v5
+  seed: 42
+
+model:
+  backbone: vgg19_bn
+  pretrained: true
+  num_classes: 5
+  dropout: 0.5
+
+data:
+  joints: [DIP2, DIP3, DIP4, DIP5]
+  image_size: 224
+  batch_size: 32
+  num_workers: 4
+  oversample_multipliers:
+    3: 1
+    4: 1
+
+training:
+  epochs: 35
+  lr: 0.0001
+  weight_decay: 0.0001
+  loss_type: focal
+  focal_gamma: 2.0
+  oa_threshold_kl: 3

@@ -1,0 +1,108 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_m5_v6
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_m5_v6_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+CG_CKPT="outputs/cyclegan_v6/checkpoints/best_checkpoint.pt"
+SYN_DIR="outputs/cyclegan_v6/synthetic_kl3"
+RAW_SYN="${SYN_DIR}/synthetic_manifest.csv"
+FILT_SYN="${SYN_DIR}/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v6"
+ORACLE_CKPT="${OUT_DIR}/oracle_os_focal.pt"
+
+echo "=== Step 0: Generate 2,500 Native 224px Candidates from CycleGAN v6 Checkpoint ==="
+rm -rf "${SYN_DIR}/images"
+mkdir -p "${SYN_DIR}/images"
+.venv/bin/python cyclegan/scripts/generate_synthetic.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/cyclegan_filtered.yaml \
+    --checkpoint "${CG_CKPT}" \
+    --max-samples 2500 \
+    --output-dir "${SYN_DIR}"
+
+if [ ! -f "${ORACLE_CKPT}" ]; then
+    echo "=== Step 1: Train Clean Internal Filter-2 Oracle on Clean Train Split Only ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag oracle_internal \
+        --loss-type focal \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --epochs 35 \
+        --patience 10 \
+        --min-best-epoch 5 \
+        --selection-metric oa_balanced \
+        --skip-test-eval \
+        --fast-gpu-loader \
+        --save-checkpoint "${ORACLE_CKPT}"
+else
+    echo "=== Step 1: Reusing Existing Clean Filter-2 Oracle (${ORACLE_CKPT}) ==="
+fi
+
+echo "=== Step 2: Sharp Pure-KL3 Expert Filter 2 Screening (max_ssim=0.96) ==="
+.venv/bin/python cyclegan/scripts/filter_synthetic_kl3.py \
+    --data-config configs/data_filtered.yaml \
+    --cyclegan-config configs/cyclegan_filtered.yaml \
+    --classifier-config configs/classifier_filtered.yaml \
+    --synthetic-manifest "${RAW_SYN}" \
+    --oracle-checkpoint "${ORACLE_CKPT}" \
+    --output-manifest "${FILT_SYN}" \
+    --max-bg-diff 2.0 \
+    --min-ssim 0.62 \
+    --max-ssim 0.96 \
+    --min-delta-l1 0.035 \
+    --min-joint-focus 0.75 \
+    --min-lap-ratio 0.75 \
+    --min-kl3-prob 0.50 \
+    --max-kl4-prob 0.25 \
+    --min-kl3-margin 0.20 \
+    --require-kl3-argmax \
+    --max-accepted 200
+
+echo "=== Step 3: Model 5 (Clean Filter 1 + 224px CycleGAN v6 + Sharp Pure-KL3 Filter 2 + VGG19 + OS + Focal), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v6_sd_os_focal \
+    --backbone vgg19 \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.4 1.8 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 3 \
+    --oversample-kl4 10 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0005 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 120 \
+    --patience 25 \
+    --min-best-epoch 8 \
+    --selection-metric oa_balanced \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v6_seed42.pt"

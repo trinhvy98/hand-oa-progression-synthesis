@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_model5
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_model5_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+RAW_SYN="outputs/cyclegan_filtered/synthetic_kl3/synthetic_manifest.csv"
+FILT_SYN="outputs/cyclegan_filtered/synthetic_kl3/synthetic_manifest_filtered.csv"
+ORACLE_CKPT="outputs/evaluation_v5/oracle_os_focal.pt"
+
+echo "=== Clean Reference: Real Filtered Data + OS + Focal (also Oracle for Filter 2) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --tag filtered_os_focal \
+    --loss-type focal \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --epochs 35 \
+    --save-checkpoint "${ORACLE_CKPT}"
+
+echo "=== Running Expert Medical Filter 2 on CycleGAN Candidate Pool ==="
+.venv/bin/python cyclegan/scripts/filter_synthetic_kl3.py \
+    --data-config configs/data_filtered.yaml \
+    --cyclegan-config configs/cyclegan_filtered.yaml \
+    --classifier-config configs/classifier_filtered.yaml \
+    --synthetic-manifest "${RAW_SYN}" \
+    --oracle-checkpoint "${ORACLE_CKPT}" \
+    --output-manifest "${FILT_SYN}"
+
+echo "=== Model 5: Filter 1 + CycleGAN + Expert Filter 2 + OS + Focal ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --tag model5_filtered_sd_os_focal \
+    --loss-type focal \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --epochs 35
+
+echo "=== Ablation: Filter 1 + Unfiltered CycleGAN (235) + OS + Focal ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --tag filtered_unfiltered_sd_os_focal \
+    --loss-type focal \
+    --synthetic-manifest "${RAW_SYN}" \
+    --max-synthetic 235 \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --epochs 35

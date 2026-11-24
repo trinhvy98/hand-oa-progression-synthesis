@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N orc_v5_cln
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/orc_v5_cln_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs outputs/evaluation_model5_v5_clean
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir outputs/evaluation_model5_v5_clean \
+    --tag real_os_focal_oracle_dn121 \
+    --backbone densenet121 \
+    --optimizer adamw \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --batch-size 32 \
+    --lr 0.00008 \
+    --weight-decay 0.005 \
+    --ema-decay 0.996 \
+    --translate-x 0.05 \
+    --translate-y 0.09 \
+    --scale-jitter 0.09 \
+    --brightness-jitter 0.08 \
+    --contrast-jitter 0.10 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.000001 \
+    --epochs 35 \
+    --patience 12 \
+    --min-best-epoch 4 \
+    --selection-metric oa_balanced_clean \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint outputs/evaluation_model5_v5_clean/oracle_dn121.pt

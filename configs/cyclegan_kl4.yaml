@@ -1,0 +1,52 @@
+# CycleGAN training & generation config for KL1 -> KL4 synthesis (Section 3.1 Paper)
+
+experiment:
+  name: cyclegan_dip_kl1_to_kl4_v6
+  output_dir: outputs/cyclegan_v6_kl4
+  seed: 42
+
+data:
+  domain_a_grades: [1]
+  domain_b_grades: [4]
+  joints: [DIP2, DIP3, DIP4, DIP5]
+  image_size: 224
+  in_channels: 1
+  batch_size: 16
+  num_workers: 4
+
+model:
+  ngf: 64
+  ndf: 64
+  n_res_blocks: 9
+  gan_mode: lsgan
+  pool_size: 50
+
+training:
+  epochs: 200
+  decay_start_epoch: 100
+  lr: 0.0002
+  beta1: 0.5
+  beta2: 0.999
+  lambda_cycle_a: 10.0
+  lambda_cycle_b: 10.0
+  lambda_identity: 0.5
+  save_every_epochs: 5
+  sample_every_epochs: 1
+  use_amp: true
+
+early_stopping:
+  enabled: true
+  eval_every_epochs: 5
+  min_epochs: 40
+  patience: 8
+  min_delta: 0.0005
+  min_cycle_ssim: 0.75
+  min_delta_l1: 0.015
+  use_pretrained_inception: true
+
+generation:
+  source_split: train
+  direction: a2b
+  target_label: 4
+  max_samples: 1110
+  output_subdir: synthetic_kl4

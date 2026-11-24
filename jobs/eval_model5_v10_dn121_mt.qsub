@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_v10_dnmt
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_v10_dnmt_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_v6/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v10_dn_mt"
+
+echo "=== Model 5 DenseNet121 v10 + Aux OARSI (Stage1 OA-BCE + Stage2 KL3vsKL4 Pair BCE + CleanValSel + HierOA), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v10_dn121_mt_sd_os_focal \
+    --backbone densenet121 \
+    --optimizer adamw \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.80 1.90 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 9 \
+    --synthetic-repeat-kl3 3 \
+    --batch-size 32 \
+    --lr 0.00008 \
+    --weight-decay 0.01 \
+    --ordinal-weight 0.12 \
+    --aux-subscore-weight 0.35 \
+    --oa-bce-weight 0.45 \
+    --oa-pos-weight 1.6 \
+    --severe-pair-weight 0.55 \
+    --severe-pos-weight 0.85 \
+    --ema-decay 0.996 \
+    --tta-views 1 \
+    --hierarchical-oa \
+    --translate-x 0.05 \
+    --translate-y 0.09 \
+    --scale-jitter 0.09 \
+    --cutout-prob 0.0 \
+    --brightness-jitter 0.08 \
+    --contrast-jitter 0.10 \
+    --scheduler cosine \
+    --min-lr 0.000001 \
+    --epochs 50 \
+    --patience 22 \
+    --min-best-epoch 8 \
+    --selection-metric oa_balanced_clean \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v10_dn121_mt_seed42.pt"

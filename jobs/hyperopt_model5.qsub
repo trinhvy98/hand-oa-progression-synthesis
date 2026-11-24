@@ -1,0 +1,128 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N hyperopt_m5
+#$ -t 1-2
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.9
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/hyperopt_model5_$JOB_ID.$TASK_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+TASK_ID="${SGE_TASK_ID:-1}"
+echo "Host: $(hostname -f) | Worker Task: ${TASK_ID}"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_filtered/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v5_hyperopt"
+FOCAL_JSON="${OUT_DIR}/best_focal_config.json"
+
+echo "=== Step 1 (Worker ${TASK_ID}/2): Parallel Hyperopt TPE Search (30 trials total on val split only) ==="
+.venv/bin/python evaluation/tune_focal_hyperopt.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --batch-size 128 \
+    --lr 0.00015 \
+    --max-trials 30 \
+    --trial-epochs 30 \
+    --patience 8 \
+    --min-best-epoch 8 \
+    --selection-metric oa_balanced \
+    --output-dir "${OUT_DIR}" \
+    --seed 42 \
+    --worker-id "${TASK_ID}" \
+    --resume \
+    --fast-gpu-loader
+
+if [ "${TASK_ID}" -eq 1 ]; then
+    echo "=== Step 2 (Worker 1): Clean Reference (No Synthetic) with Hyperopt Focal Config ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag filtered_hyperopt_os_focal \
+        --loss-type focal \
+        --focal-config-json "${FOCAL_JSON}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 128 \
+        --lr 0.00015 \
+        --epochs 35 \
+        --seed 42 \
+        --fast-gpu-loader
+
+    echo "=== Step 3a (Worker 1): Model 5 Seed 42 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_hyperopt_sd_os_focal \
+        --loss-type focal \
+        --focal-config-json "${FOCAL_JSON}" \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 128 \
+        --lr 0.00015 \
+        --epochs 35 \
+        --seed 42 \
+        --seed-tagged \
+        --fast-gpu-loader
+
+    echo "=== Step 4 (Worker 1): Waiting for Worker 2 Seeds 123 & 456 and Summarizing ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_hyperopt_sd_os_focal \
+        --summarize-seeds 42 123 456 \
+        --wait-timeout 3600
+else
+    echo "=== Step 3b (Worker 2): Model 5 Seed 123 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_hyperopt_sd_os_focal \
+        --loss-type focal \
+        --focal-config-json "${FOCAL_JSON}" \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 128 \
+        --lr 0.00015 \
+        --epochs 35 \
+        --seed 123 \
+        --seed-tagged \
+        --fast-gpu-loader
+
+    echo "=== Step 3c (Worker 2): Model 5 Seed 456 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_hyperopt_sd_os_focal \
+        --loss-type focal \
+        --focal-config-json "${FOCAL_JSON}" \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 128 \
+        --lr 0.00015 \
+        --epochs 35 \
+        --seed 456 \
+        --seed-tagged \
+        --fast-gpu-loader
+fi

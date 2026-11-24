@@ -1,0 +1,61 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N v5_cw_bal
+#$ -l h_rt=01:30:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/v5_cw_bal_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs outputs/evaluation_model5_v5_clean
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_v5_clean/synthetic_kl3/synthetic_manifest_physical_v2.csv"
+OUT_DIR="outputs/evaluation_model5_v5_clean"
+
+echo "=== VGG19 no-BN + Focal gamma=2.94 + Balanced KL4 Class Weights [0.80, 0.80, 0.80, 1.40, 2.20], Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v5_clean_vgg19_cw_bal \
+    --backbone vgg19 \
+    --optimizer adam \
+    --loss-type focal \
+    --focal-gamma 2.94 \
+    --class-weights 0.80 0.80 0.80 1.40 2.20 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --synthetic-repeat-kl3 1 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0 \
+    --ema-decay 0.0 \
+    --scale-jitter 0.0 \
+    --brightness-jitter 0.0 \
+    --contrast-jitter 0.0 \
+    --translate-x 0.0 \
+    --translate-y 0.0 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 200 \
+    --patience 10 \
+    --min-best-epoch 1 \
+    --selection-metric val_loss \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v5_clean_vgg19_cw_bal_seed42.pt"

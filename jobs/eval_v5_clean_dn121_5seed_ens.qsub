@@ -1,0 +1,34 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N ens_v5_dn5
+#$ -l h_rt=00:15:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=16G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/ens_v5_dn5_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+echo "=== 5-Seed Ensemble (DenseNet121 MT Clean v2 + Pure Physical Filter 2, Seeds 42..46) ==="
+.venv/bin/python evaluation/eval_ensemble.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --hierarchical-oa \
+    --output-json outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_5seed_ensemble_metrics.json \
+    --models \
+        densenet121:outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_seed42.pt \
+        densenet121:outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_seed43.pt \
+        densenet121:outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_seed44.pt \
+        densenet121:outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_seed45.pt \
+        densenet121:outputs/evaluation_model5_v5_clean/model5_v5_clean_dn121_mt_seed46.pt

@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_cyclegan
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_cyclegan_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+SYN_CSV="outputs/cyclegan/synthetic_kl3/synthetic_manifest.csv"
+
+echo "=== Strategy 1: Baseline (Real Data + CE) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --tag baseline_ce --loss-type ce --epochs 35
+
+echo "=== Strategy 2: CycleGAN Synthetic Data (SD + CE) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --tag cyclegan_sd_ce --loss-type ce --synthetic-manifest "${SYN_CSV}" --max-synthetic 235 --epochs 35
+
+echo "=== Strategy 3: Oversampling + Focal Loss (OS + FL, No Synthetic) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --tag baseline_os_focal --loss-type focal --oversample-kl3 5 --oversample-kl4 10 --epochs 35
+
+echo "=== Strategy 4: CycleGAN Synthetic + Oversampling + Focal Loss (SD + OS + FL) ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --tag cyclegan_sd_os_focal --loss-type focal --synthetic-manifest "${SYN_CSV}" --max-synthetic 235 --oversample-kl3 5 --oversample-kl4 10 --epochs 35

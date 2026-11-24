@@ -1,0 +1,38 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N cyclegan_hoa
+#$ -l h_rt=12:00:00
+#$ -l gpus=2
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=32G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/cyclegan_hoa_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+export OMP_NUM_THREADS=2
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python cyclegan/scripts/prepare_splits.py --config configs/data.yaml
+
+RESUME_ARGS=()
+if [ -n "${RESUME_CKPT:-}" ]; then
+    echo "Resuming from checkpoint: ${RESUME_CKPT}"
+    RESUME_ARGS=(--resume "${RESUME_CKPT}")
+fi
+
+.venv/bin/python -m torch.distributed.run \
+    --standalone \
+    --nproc_per_node=2 \
+    cyclegan/scripts/train_cyclegan.py \
+    --data-config configs/data.yaml \
+    --config configs/cyclegan.yaml \
+    "${RESUME_ARGS[@]}"

@@ -1,0 +1,46 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N cg_v6_kl4
+#$ -l h_rt=02:00:00
+#$ -l gpus=2
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/cg_v6_kl4_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+export OMP_NUM_THREADS=2
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python -m torch.distributed.run \
+    --standalone \
+    --nproc_per_node=2 \
+    cyclegan/scripts/train_cyclegan.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/cyclegan_kl4.yaml
+
+CKPT="outputs/cyclegan_v6_kl4/checkpoints/best_checkpoint.pt"
+if [ ! -f "${CKPT}" ]; then
+    CKPT="$(ls -1 outputs/cyclegan_v6_kl4/checkpoints/epoch_*.pt | tail -n 1)"
+fi
+echo "Generating 1,110 native 224x224 KL4 candidates from checkpoint: ${CKPT}"
+
+SYN_DIR="outputs/cyclegan_v6_kl4/synthetic_kl4"
+rm -rf "${SYN_DIR}/images"
+mkdir -p "${SYN_DIR}/images"
+
+.venv/bin/python cyclegan/scripts/generate_synthetic.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/cyclegan_kl4.yaml \
+    --checkpoint "${CKPT}" \
+    --max-samples 1110 \
+    --output-dir "${SYN_DIR}"

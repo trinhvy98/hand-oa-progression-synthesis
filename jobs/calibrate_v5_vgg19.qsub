@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N cal_v5_vgg
+#$ -l h_rt=00:15:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=16G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/cal_v5_vgg_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+.venv/bin/python evaluation/calibrate_checkpoint.py \
+    --data-config configs/data_filtered_v2.yaml \
+    --config configs/classifier_filtered.yaml \
+    --checkpoint outputs/evaluation_model5_v5_clean/model5_v5_clean_paper_vgg19_s6_focal_seed42.pt \
+    --backbone vgg19 \
+    --output-json outputs/evaluation_model5_v5_clean/model5_v5_clean_paper_vgg19_s6_focal_seed42_calibrated_metrics.json

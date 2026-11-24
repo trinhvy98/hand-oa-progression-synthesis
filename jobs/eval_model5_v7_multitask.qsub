@@ -1,0 +1,102 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_m5_v7m
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_m5_v7m_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+ORACLE_CKPT="outputs/evaluation_v6/oracle_os_focal.pt"
+SYN_KL3="outputs/cyclegan_v6/synthetic_kl3/synthetic_manifest_filtered.csv"
+RAW_KL4="outputs/cyclegan_v6_kl4/synthetic_kl4/synthetic_manifest.csv"
+FILT_KL4="outputs/cyclegan_v6_kl4/synthetic_kl4_v7_mt/synthetic_manifest_filtered.csv"
+COMBINED_SYN="outputs/cyclegan_v6_kl4/synthetic_kl34_v7_mt_combined.csv"
+OUT_DIR="outputs/evaluation_v7_multitask"
+
+echo "=== Step 1: High-Purity Crisp KL4 Filter 2 Screening (v7 multitask) ==="
+.venv/bin/python cyclegan/scripts/filter_synthetic_kl3.py \
+    --data-config configs/data_filtered.yaml \
+    --cyclegan-config configs/cyclegan_kl4.yaml \
+    --classifier-config configs/classifier_filtered.yaml \
+    --synthetic-manifest "${RAW_KL4}" \
+    --oracle-checkpoint "${ORACLE_CKPT}" \
+    --output-manifest "${FILT_KL4}" \
+    --target-kl 4 \
+    --max-bg-diff 2.8 \
+    --min-ssim 0.62 \
+    --max-ssim 0.96 \
+    --min-delta-l1 0.035 \
+    --min-joint-focus 0.70 \
+    --min-lap-ratio 0.70 \
+    --max-lap-ratio 3.4 \
+    --min-kl3-prob 0.65 \
+    --min-kl3-margin 0.30 \
+    --require-kl3-argmax \
+    --min-keep 20 \
+    --max-accepted 140
+
+echo "=== Step 2: Combine Pure-KL3 (200) + Crisp-KL4 Manifests ==="
+.venv/bin/python -c "
+import pandas as pd
+df3 = pd.read_csv('${SYN_KL3}')
+df4 = pd.read_csv('${FILT_KL4}')
+comb = pd.concat([df3, df4], ignore_index=True)
+comb.to_csv('${COMBINED_SYN}', index=False)
+print('Combined synthetic counts:', comb['target_kl'].value_counts().sort_index().to_dict())
+"
+
+echo "=== Step 3: Model 5 ConvNeXt-Tiny v7 + Train-Only OARSI Aux Supervision (OP+JSN+ER), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v7_mt_cnxt_sd_os_focal \
+    --backbone convnext_tiny \
+    --optimizer adamw \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.65 1.95 \
+    --synthetic-manifest "${COMBINED_SYN}" \
+    --oversample-kl3 4 \
+    --oversample-kl4 8 \
+    --synthetic-repeat-kl3 2 \
+    --synthetic-repeat-kl4 2 \
+    --batch-size 32 \
+    --lr 0.00004 \
+    --weight-decay 0.01 \
+    --stochastic-depth 0.20 \
+    --ordinal-weight 0.12 \
+    --aux-subscore-weight 0.35 \
+    --ema-decay 0.996 \
+    --tta-views 5 \
+    --hierarchical-oa \
+    --translate-x 0.07 \
+    --translate-y 0.14 \
+    --scale-jitter 0.14 \
+    --cutout-prob 0.25 \
+    --brightness-jitter 0.12 \
+    --contrast-jitter 0.14 \
+    --scheduler cosine \
+    --min-lr 0.000001 \
+    --epochs 50 \
+    --patience 22 \
+    --min-best-epoch 10 \
+    --selection-metric oa_balanced \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v7_mt_seed42.pt"

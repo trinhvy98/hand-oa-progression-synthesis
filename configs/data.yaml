@@ -1,0 +1,25 @@
+# Shared dataset & patient-level split configuration
+# Reused identically across CycleGAN, Diffusion, and Downstream Evaluation.
+
+paths:
+  excel_path: data/hand.xlsx
+  images_dir: data/Finger Joints
+  manifest_path: data/processed/manifest.csv
+
+dataset:
+  # Joints matching the filename suffix `<patient_id>_<joint>.png`
+  # Use ["DIP2", "DIP3", "DIP4", "DIP5"] for DIP focus, or add PIP2..5 / MCP2..5
+  joints:
+    - DIP2
+    - DIP3
+    - DIP4
+    - DIP5
+  visit: v00
+  valid_kl_grades: [0, 1, 2, 3, 4]
+
+split:
+  # 15% locked test set; remaining 85% split 90/10 into train (76.5%) and val (8.5%)
+  train_ratio: 0.765
+  val_ratio: 0.085
+  test_ratio: 0.150
+  seed: 42

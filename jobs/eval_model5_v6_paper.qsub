@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_m5_paper
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_m5_paper_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_v6/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v6_paper"
+
+echo "=== Model 5 Paper Strategy-6 Recipe (Clean Filter1 + 200 Pure-KL3 + OS 5/10 + Focal gamma=2.94 + VGG19 Adam 1e-5), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_v6_paper_sd_os_focal \
+    --backbone vgg19 \
+    --optimizer adam \
+    --loss-type focal \
+    --focal-gamma 2.94 \
+    --class-weights 0.80 0.80 0.80 1.60 1.44 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 5 \
+    --oversample-kl4 10 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0 \
+    --scale-jitter 0.0 \
+    --brightness-jitter 0.0 \
+    --contrast-jitter 0.0 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 120 \
+    --patience 25 \
+    --min-best-epoch 8 \
+    --selection-metric oa_balanced \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_v6_paper_seed42.pt"

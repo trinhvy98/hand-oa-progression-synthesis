@@ -1,0 +1,39 @@
+# Filtered dataset & patient-level split configuration (Filter 1 v2 clinical thresholds)
+
+paths:
+  excel_path: data/hand.xlsx
+  images_dir: data/Finger Joints
+  manifest_path: data/processed/manifest_filtered_v2.csv
+
+dataset:
+  joints:
+    - DIP2
+    - DIP3
+    - DIP4
+    - DIP5
+  visit: v00
+  valid_kl_grades: [0, 1, 2, 3, 4]
+
+split:
+  train_ratio: 0.765
+  val_ratio: 0.085
+  test_ratio: 0.150
+  seed: 42
+
+quality_filter:
+  min_laplacian_var: 18.0
+  min_norm_fg_laplacian_var: 95.0
+  min_dynamic_range: 60.0
+  max_overexposed_frac: 0.15
+  overexposed_pixel_thresh: 245
+  min_center_mean: 24.0
+  min_center_fg_frac: 0.55
+  max_center_dx: 30.0
+  max_center_dy: 32.0
+  max_center_dist: 36.0
+  min_aspect_ratio: 0.25
+  max_aspect_ratio: 1.35
+  min_bone_area_frac: 0.16
+  max_bone_area_frac: 0.96
+  max_tilt_deg: 45.0
+  min_foreground_pixels: 10

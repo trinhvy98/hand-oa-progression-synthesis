@@ -1,0 +1,105 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_trial29
+#$ -t 1-2
+#$ -l h_rt=01:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.9
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_trial29_$JOB_ID.$TASK_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+TASK_ID="${SGE_TASK_ID:-1}"
+echo "Host: $(hostname -f) | Worker Task: ${TASK_ID}"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_filtered/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v5_trial29"
+
+# Trial 29 hyperparameters (highest val_macro_f1=0.7007 across all 30 Hyperopt trials)
+# Runs ONLY the full Model 5 configuration: Filter 1 + CycleGAN Filter 2 + OS + Focal Loss
+GAMMA="1.929575"
+WEIGHTS="2.673341 2.673341 2.673341 4.353098 7.239295"
+
+if [ "${TASK_ID}" -eq 1 ]; then
+    echo "=== GPU Worker 1: Model 5 Trial 29 (Filter 1 + Filter 2 + OS + Focal) Seed 42 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_trial29_sd_os_focal \
+        --loss-type focal \
+        --focal-gamma "${GAMMA}" \
+        --class-weights ${WEIGHTS} \
+        --min-best-epoch 8 \
+        --selection-metric macro_f1 \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 32 \
+        --lr 0.0001 \
+        --epochs 35 \
+        --seed 42 \
+        --seed-tagged \
+        --fast-gpu-loader
+
+    echo "=== GPU Worker 1: Waiting for GPU Worker 2 Seeds 123 & 456 and Summarizing ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_trial29_sd_os_focal \
+        --summarize-seeds 42 123 456 \
+        --wait-timeout 2400
+else
+    echo "=== GPU Worker 2: Model 5 Trial 29 (Filter 1 + Filter 2 + OS + Focal) Seed 123 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_trial29_sd_os_focal \
+        --loss-type focal \
+        --focal-gamma "${GAMMA}" \
+        --class-weights ${WEIGHTS} \
+        --min-best-epoch 8 \
+        --selection-metric macro_f1 \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 32 \
+        --lr 0.0001 \
+        --epochs 35 \
+        --seed 123 \
+        --seed-tagged \
+        --fast-gpu-loader
+
+    echo "=== GPU Worker 2: Model 5 Trial 29 (Filter 1 + Filter 2 + OS + Focal) Seed 456 ==="
+    .venv/bin/python evaluation/run_downstream_eval.py \
+        --data-config configs/data_filtered.yaml \
+        --config configs/classifier_filtered.yaml \
+        --output-dir "${OUT_DIR}" \
+        --tag model5_trial29_sd_os_focal \
+        --loss-type focal \
+        --focal-gamma "${GAMMA}" \
+        --class-weights ${WEIGHTS} \
+        --min-best-epoch 8 \
+        --selection-metric macro_f1 \
+        --synthetic-manifest "${FILT_SYN}" \
+        --oversample-kl3 5 \
+        --oversample-kl4 10 \
+        --batch-size 32 \
+        --lr 0.0001 \
+        --epochs 35 \
+        --seed 456 \
+        --seed-tagged \
+        --fast-gpu-loader
+fi

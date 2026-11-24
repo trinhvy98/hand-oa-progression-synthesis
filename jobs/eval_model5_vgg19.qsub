@@ -1,0 +1,53 @@
+#!/bin/bash -l
+#$ -P cs790
+#$ -N eval_m5_vgg19
+#$ -l h_rt=02:00:00
+#$ -l gpus=1
+#$ -l gpu_c=8.0
+#$ -l gpu_memory=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o logs/eval_m5_vgg19_$JOB_ID.log
+
+set -euo pipefail
+
+cd "${SGE_O_WORKDIR:-$PWD}"
+mkdir -p logs
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${PWD}/src:${PWD}:${PYTHONPATH:-}"
+
+echo "Host: $(hostname -f)"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+
+FILT_SYN="outputs/cyclegan_filtered/synthetic_kl3/synthetic_manifest_filtered.csv"
+OUT_DIR="outputs/evaluation_v5_vgg19"
+
+echo "=== Model 5 (Pure-KL3 Filter 2 219 imgs + VGG19 no-BN + Jitter + OS + Focal + Plateau), Seed 42 ==="
+.venv/bin/python evaluation/run_downstream_eval.py \
+    --data-config configs/data_filtered.yaml \
+    --config configs/classifier_filtered.yaml \
+    --output-dir "${OUT_DIR}" \
+    --tag model5_vgg19_sd_os_focal \
+    --backbone vgg19 \
+    --loss-type focal \
+    --focal-gamma 2.0 \
+    --class-weights 1.0 1.0 1.0 1.35 1.5 \
+    --synthetic-manifest "${FILT_SYN}" \
+    --oversample-kl3 3 \
+    --oversample-kl4 10 \
+    --batch-size 32 \
+    --lr 0.00001 \
+    --weight-decay 0.0005 \
+    --scheduler plateau \
+    --lr-factor 0.5 \
+    --lr-patience 5 \
+    --min-lr 0.0000005 \
+    --epochs 120 \
+    --patience 25 \
+    --min-best-epoch 5 \
+    --selection-metric val_balanced_loss \
+    --seed 42 \
+    --seed-tagged \
+    --fast-gpu-loader \
+    --save-checkpoint "${OUT_DIR}/model5_vgg19_seed42.pt"
